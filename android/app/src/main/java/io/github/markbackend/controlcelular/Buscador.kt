@@ -21,6 +21,8 @@ class Buscador(contexto: Context) {
 
     private val pcs = ConcurrentHashMap<String, Pc>()
     @Volatile private var activo = false
+    // Cada empezar() crea un hilo con su número: un hilo viejo que todavía no terminó deja de escuchar solo.
+    @Volatile private var generacion = 0
     @Volatile private var socket: DatagramSocket? = null
     private val candado = (contexto.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
         .createMulticastLock("controlcelular").apply { setReferenceCounted(false) }
@@ -28,8 +30,9 @@ class Buscador(contexto: Context) {
     fun empezar() {
         if (activo) return
         activo = true
+        val numero = ++generacion
         try { candado.acquire() } catch (e: Exception) { }
-        thread(name = "buscador", isDaemon = true) { escuchar() }
+        thread(name = "buscador", isDaemon = true) { escuchar { activo && generacion == numero } }
     }
 
     fun parar() {
@@ -38,27 +41,34 @@ class Buscador(contexto: Context) {
         try { if (candado.isHeld) candado.release() } catch (e: Exception) { }
     }
 
-    private fun escuchar() {
-        try {
-            val s = DatagramSocket(null)
-            socket = s
-            s.reuseAddress = true
-            s.broadcast = true
-            s.bind(InetSocketAddress(Protocolo.PUERTO_FARO))
-            val buffer = ByteArray(512)
-            while (activo) {
-                val paquete = DatagramPacket(buffer, buffer.size)
-                s.receive(paquete)
-                val partes = String(paquete.data, 0, paquete.length, Charsets.UTF_8).split(" ", limit = 4)
-                if (partes.size < 3 || partes[0] != "CONTROLCELULAR" || partes[1] != "1") continue
-                val puerto = partes[2].toIntOrNull() ?: continue
-                val ip = paquete.address?.hostAddress ?: continue
-                pcs[ip] = Pc(ip, puerto, partes.getOrElse(3) { "PC" }, SystemClock.elapsedRealtime())
+    private fun escuchar(sigue: () -> Boolean) {
+        // Si el puerto todavía está ocupado (por ejemplo, el hilo anterior no terminó de cerrarlo al volver a la
+        // app), se reintenta cada medio segundo en vez de quedarse sin buscar hasta la próxima vez.
+        while (sigue()) {
+            var s: DatagramSocket? = null
+            try {
+                s = DatagramSocket(null)
+                s.reuseAddress = true
+                s.broadcast = true
+                s.bind(InetSocketAddress(Protocolo.PUERTO_FARO))
+                socket = s
+                if (!sigue()) break
+                val buffer = ByteArray(512)
+                while (sigue()) {
+                    val paquete = DatagramPacket(buffer, buffer.size)
+                    s.receive(paquete)
+                    val partes = String(paquete.data, 0, paquete.length, Charsets.UTF_8).split(" ", limit = 4)
+                    if (partes.size < 3 || partes[0] != "CONTROLCELULAR" || partes[1] != "1") continue
+                    val puerto = partes[2].toIntOrNull() ?: continue
+                    val ip = paquete.address?.hostAddress ?: continue
+                    pcs[ip] = Pc(ip, puerto, partes.getOrElse(3) { "PC" }, SystemClock.elapsedRealtime())
+                }
+            } catch (e: Exception) {
+                // se cerró (la app pasó a segundo plano) o el puerto está ocupado
+            } finally {
+                s?.close()  // solo el de este hilo (nunca el de un hilo nuevo)
             }
-        } catch (e: Exception) {
-            // se cerró (la app pasó a segundo plano) o el puerto está ocupado: se vuelve a abrir al volver
-        } finally {
-            socket?.close()
+            if (sigue()) try { Thread.sleep(500) } catch (e: InterruptedException) { }
         }
     }
 

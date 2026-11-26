@@ -93,6 +93,7 @@ def test_emparejar_reconectar_y_codigo_equivocado(servidor):
         ws, m = await entrar(servidor, servidor["codigo"])
         token = m["ok"].split()[1]
         assert m["n"] == "n 1" and m["m"] == "m xbox" and m["c"] == "c {}"
+        assert m["app"] == "app " + __import__("version").VERSION  # para que la app avise si está vieja
         await ws.close()
         ws, m = await entrar(servidor, token)  # vuelve con el token, sin código
         assert m["n"] == "n 1"

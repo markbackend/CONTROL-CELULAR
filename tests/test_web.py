@@ -231,6 +231,7 @@ window.ControlCelularApp = {
     setTimeout(() => { ccEvento("open", ""); ccEvento("msg", "ok x"); ccEvento("msg", "n 2"); }, 0); },
   enviar: (m) => APPLOG.enviar.push(m), cerrar: () => {}, vibrar: (p) => APPLOG.vibrar.push(p),
   abrirAnclaje: () => { APPLOG.anclaje = true; }, version: () => "1.8.0",
+  abrirEnlace: (u) => { APPLOG.enlace = u; },
 };
 """
 
@@ -268,3 +269,49 @@ def test_app_recuerda_la_pc_y_el_bluetooth():
                  ajustes={"destino": '{"tipo":"red","ip":"10.0.0.5","puerto":8765,"nombre":"PC"}'}, antes=APP_FALSA)
     assert r["directo"] and r["volvioALaLista"]
     assert r["intentos"] == ["red", "bt"] and r["listaOtraVez"]  # Bluetooth falló: avisa y vuelve a la lista
+
+
+def test_app_animacion_de_apertura():
+    # En la app: tapa la pantalla al abrir, se va sola (~2,2 s) y no vuelve a salir al recargar la página.
+    # Chrome sin pantalla dice «animaciones reducidas»: acá se simula un celular normal. (Las imágenes del control no
+    # están junto a la página de prueba: que se vea bien se comprueba con una captura, aparte.)
+    normal = """const _mm = window.matchMedia.bind(window);
+window.matchMedia = (q) => /reduced-motion/.test(q) ? { matches: false } : _mm(q);"""
+    r = ejecutar("index.html", """
+      const capa = document.getElementById('apertura');
+      const alAbrir = !capa.hidden;
+      await espera(4600);
+      return { alAbrir, alFinal: capa.hidden, vista: sessionStorage.getItem('aperturaVista') };""",
+                 antes=APP_FALSA + normal)
+    assert r["alAbrir"] and r["alFinal"] and r["vista"] == "1"
+    # En el navegador (sin la app) no sale
+    r = ejecutar("index.html", "return { tapa: !document.getElementById('apertura').hidden };")
+    assert not r["tapa"]
+
+
+def test_app_avisa_si_la_pc_tiene_una_app_mas_nueva():
+    r = ejecutar("index.html", """
+      await espera(60);
+      const capa = document.getElementById('appNueva');
+      ccEvento("msg", "app 1.8.0"); await espera(10);
+      const alDia = capa.classList.contains('ver');
+      ccEvento("msg", "app 1.10.0"); await espera(10);
+      const vieja = capa.classList.contains('ver'), texto = document.getElementById('appNuevaTexto').textContent;
+      document.getElementById('appNuevaBajar').click(); await espera(10);
+      ccEvento("msg", "app 1.10.0"); await espera(10);
+      return { alDia, vieja, texto, enlace: APPLOG.enlace, otraVez: capa.classList.contains('ver') };""",
+                 ajustes={"destino": '{"tipo":"red","ip":"192.168.0.244","puerto":8765,"nombre":"PC-SALA"}'},
+                 antes=APP_FALSA)
+    assert not r["alDia"] and r["vieja"] and "1.8.0" in r["texto"] and "1.10.0" in r["texto"]
+    assert r["enlace"] == "http://192.168.0.244:8765/app.apk"
+    assert not r["otraVez"]  # una vez por apertura de la app
+
+
+def test_app_sigue_a_la_pc_si_cambia_de_direccion():
+    # Con el cable USB la dirección de la PC cambia cada vez que se activa el anclaje: la app usa la que avisa ahora.
+    r = ejecutar("index.html", """
+      await espera(60);
+      return { destino: APPLOG.conectar[0], guardado: JSON.parse(localStorage.getItem('destino')) };""",
+                 ajustes={"destino": '{"tipo":"red","ip":"192.168.42.10","puerto":8765,"nombre":"PC-SALA"}'},
+                 antes=APP_FALSA)
+    assert r["destino"]["ip"] == "192.168.0.244" and r["guardado"]["ip"] == "192.168.0.244"

@@ -40,7 +40,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: saca el código que no se usa (Kotlin, OkHttp, AndroidX) y achica el resto. Más liviana y rápida.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("publicar") ?: signingConfigs.getByName("debug")
         }
     }
@@ -55,6 +58,14 @@ android {
 
     // La página del control es la misma que sirve la PC (carpeta web/): la app la lleva adentro.
     sourceSets["main"].assets.srcDirs(rootDir.resolve("../web"))
+    // ...menos lo que la app no usa: las páginas de iPhone, la del certificado, la ventana de la PC, el service
+    // worker y los íconos grandes (son para instalar la página o para la PC).
+    androidResources {
+        ignoreAssetsPatterns += listOf(
+            "iphone.html", "configurar.html", "configurar-iphone.html", "panel.html", "sw.js",
+            "icono-512.png", "icono-maskable-512.png", "icono-bandeja.png",
+        )
+    }
 }
 
 dependencies {

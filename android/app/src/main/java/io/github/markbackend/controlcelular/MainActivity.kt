@@ -2,11 +2,13 @@ package io.github.markbackend.controlcelular
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +23,8 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
+import android.webkit.JsResult
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -54,6 +58,24 @@ class MainActivity : Activity() {
     override fun onCreate(estado: Bundle?) {
         super.onCreate(estado)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Toda la pantalla, también al lado de la cámara (si no, queda una franja negra) y detrás de las barras.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            // Android vuelve a mostrar las barras cuando el celular gira (y al deslizar desde el borde): si aparecen,
+            // se vuelven a esconder a los 2,5 s (alcanza para usarlas si uno las sacó a propósito).
+            window.decorView.setOnApplyWindowInsetsListener { vista, insets ->
+                if (insets.isVisible(WindowInsets.Type.statusBars()) || insets.isVisible(WindowInsets.Type.navigationBars())) {
+                    principal.removeCallbacks(esconderBarras)
+                    principal.postDelayed(esconderBarras, 2500)
+                }
+                vista.onApplyWindowInsets(insets)
+            }
+        }
         buscador = Buscador(this)
 
         val cargador = WebViewAssetLoader.Builder()
@@ -74,6 +96,17 @@ class MainActivity : Activity() {
                     return pedirALaPC(url)
                 }
                 return cargador.shouldInterceptRequest(url)
+            }
+        }
+        // Sin esto, el WebView no muestra los carteles de la página (alert/confirm): confirm() daría siempre «no».
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onJsAlert(vista: WebView, url: String?, texto: String?, resultado: JsResult): Boolean {
+                cartel(texto, false, resultado)
+                return true
+            }
+            override fun onJsConfirm(vista: WebView, url: String?, texto: String?, resultado: JsResult): Boolean {
+                cartel(texto, true, resultado)
+                return true
             }
         }
         web.addJavascriptInterface(Puente(), "ControlCelularApp")
@@ -105,6 +138,13 @@ class MainActivity : Activity() {
         if (foco) pantallaCompleta()
     }
 
+    override fun onConfigurationChanged(nueva: Configuration) {
+        super.onConfigurationChanged(nueva)
+        pantallaCompleta()  // al girar, Android vuelve a mostrar las barras
+    }
+
+    private val esconderBarras = Runnable { if (hasWindowFocus()) pantallaCompleta() }
+
     @Deprecated("Atrás deja la app abierta de fondo, sin cortar la conexión")
     override fun onBackPressed() {
         moveTaskToBack(true)
@@ -122,6 +162,16 @@ class MainActivity : Activity() {
                 or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
         }
+    }
+
+    private fun cartel(texto: String?, pregunta: Boolean, resultado: JsResult) {
+        if (isFinishing) { resultado.cancel(); return }
+        val dialogo = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setMessage(texto ?: "")
+            .setPositiveButton(android.R.string.ok) { _, _ -> resultado.confirm() }
+            .setOnCancelListener { resultado.cancel() }
+        if (pregunta) dialogo.setNegativeButton(android.R.string.cancel) { _, _ -> resultado.cancel() }
+        dialogo.show()
     }
 
     // ---------- Eventos hacia la página ----------
@@ -286,6 +336,14 @@ class MainActivity : Activity() {
         @JavascriptInterface fun cerrar() { principal.post { conexion?.cerrar(); conexion = null } }
         @JavascriptInterface fun vibrar(patron: String) { this@MainActivity.vibrar(patron) }
         @JavascriptInterface fun abrirAnclaje() { principal.post { this@MainActivity.abrirAnclaje() } }
+        /** Abre un enlace en el navegador (para bajar la app nueva). Solo http/https. */
+        @JavascriptInterface fun abrirEnlace(url: String) {
+            val uri = Uri.parse(url)
+            if (uri.scheme != "http" && uri.scheme != "https") return
+            principal.post {
+                try { startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { }
+            }
+        }
         @JavascriptInterface fun version(): String =
             try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
     }

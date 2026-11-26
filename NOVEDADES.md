@@ -1,5 +1,20 @@
 # Novedades
 
+## 1.9.0
+
+- **Animación de apertura en la app de Android:** al abrirla, el control aparece, el neón celeste → verde se enciende
+  y sale el nombre (2,2 s; un toque la saltea). Mientras tanto la app ya busca la PC.
+- **La app avisa cuando hay una versión nueva:** al conectarse, si el programa de la PC es más nuevo que la app, aparece
+  «Hay una versión nueva de la app» con un botón para bajarla desde la misma PC (por Bluetooth, desde GitHub). Se
+  instala encima, sin perder controles ni ajustes. (Anda desde esta versión en adelante: la 1.8.0 no sabe avisar.)
+- **Arreglos de la app:** los carteles de la página ahora se ven (por ejemplo, ya se puede confirmar «Copiar ajustes de
+  otro celular»); con el cable USB, si la PC cambia de dirección al activar el anclaje, la app la sigue sola; el
+  buscador de PCs ya no se traba al salir y volver rápido a la app.
+- **Pantalla completa de verdad:** las barras de Android ya no tapan la app al girar el celular, y la app usa también
+  el costado de la cámara (antes quedaba una franja negra).
+- **App 4 veces más liviana:** pasó de 1,8 MB a 0,4 MB (abre más rápido y ocupa menos memoria).
+- Probada en un Galaxy A06 con Android 16: animación, búsqueda de la PC por WiFi, emparejamiento y botones (15 ms).
+
 ## 1.8.0
 
 - **App de Android (`ControlCelular.apk`):** se instala en el celular y se conecta con la PC de tres formas, para que

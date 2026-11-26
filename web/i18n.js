@@ -24,6 +24,10 @@
     "Conectar por Bluetooth": "Connect via Bluetooth",
     "Escribir la dirección de la PC a mano": "Type the PC's address",
     "Cambiar de PC o de conexión": "Change PC or connection",
+    "Hay una versión nueva de la app": "There's a new version of the app",
+    "Tenés la {n}": "You have {n}", "y la PC tiene la {n}.": "and the PC has {n}.",
+    "Más tarde": "Later", "Bajarla": "Download it",
+    "Se instala encima de esta: no perdés tus controles ni tus ajustes.": "It installs over this one: you keep your controllers and settings.",
     "Por Bluetooth no se puede ver la lista de juegos: elegí el tipo de control en «Control para».": "The game list isn't available over Bluetooth: pick the controller type in “Controller for”.",
     // ---- Menú ☰
     "Elegí el control": "Choose your controller",

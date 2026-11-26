@@ -8,7 +8,7 @@ import json
 import re
 import urllib.request
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 REPO = "markbackend/CONTROL-CELULAR"
 PAGINA_RELEASES = f"https://github.com/{REPO}/releases/latest"
 

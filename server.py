@@ -29,6 +29,7 @@ Protocolo (texto, mensajes cortos):
                   "v <grande> <chico>"   vibración (0-255 cada motor)
                   "j <appid> <tipo> <nombre>" | "j 0"   juego de Steam abierto en la PC (o ninguno)
                   "p <n>"                respuesta al ping
+                  "app <versión>"        versión del programa de la PC (la app de Android avisa si es más vieja)
   HTTP(S):        /juegos?t=<token>      biblioteca de Steam (JSON)   /portada/<appid>?t=<token>  portada
                   /qr                    QR para conectarse (solo desde esta misma PC)
 
@@ -55,6 +56,7 @@ import panel
 import red
 import rutas
 import steam
+import version
 from celulares import Registro
 from idioma import T
 from mandos import TIPOS_MANDO, Jugador
@@ -222,7 +224,8 @@ async def atender(ws):
     await ws.send(f"n {j.numero}")
     await ws.send(f"m {j.tipo}")
     await ws.send("c " + json.dumps(registro.ajustes_de(token), ensure_ascii=False))
-    await ws.send(mensaje_abierto())
+    await ws.send(f"app {version.VERSION}")  # la app de Android avisa si ella es más vieja (hay que bajar la nueva)
+    await ws.send(mensaje_abierto())  # el último del saludo
     print(T(f"  Jugador {j.numero} conectado ({celular['nombre']}):",
             f"  Player {j.numero} connected ({celular['nombre']}):"), ip)
     avisar_conexiones()

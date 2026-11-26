@@ -227,12 +227,17 @@
   .capa button.principal { background: var(--X); color: #fff; border-color: var(--X); font-weight: 700; }
   [hidden] { display: none !important; }
   #girar { display: none; }
+  /* Animación de apertura (solo en la app de Android): tapa todo mientras la app arranca por detrás */
+  #apertura { position: fixed; inset: 0; z-index: 30; background: #050608; transition: opacity .4s; }
+  #apertura canvas { width: 100%; height: 100%; display: block; }
+  #apertura.sale { opacity: 0; pointer-events: none; }
   @media (orientation: portrait) {
     #girar { display: flex; z-index: 20; }
   }
 </style>
 </head>
 <body>
+<div id="apertura" hidden><canvas id="aperturaLienzo"></canvas></div>
 <div class="control" id="pad3" hidden></div>
 
 <div class="edBarra" id="edArriba" hidden>
@@ -285,6 +290,13 @@
   </div>
   <details><summary>Escribir la dirección de la PC a mano</summary>
     <input id="pcManual" inputmode="decimal" placeholder="192.168.0.10" autocomplete="off"> <button id="pcManualIr">Conectar</button></details>
+</div>
+
+<div class="capa" id="appNueva">
+  <h2>Hay una versión nueva de la app</h2>
+  <div id="appNuevaTexto"></div>
+  <div class="tutBotones"><button id="appNuevaLuego">Más tarde</button><button class="principal" id="appNuevaBajar">Bajarla</button></div>
+  <div style="font-size: 3.4vh; opacity: .75">Se instala encima de esta: no perdés tus controles ni tus ajustes.</div>
 </div>
 
 <div class="capa" id="menu">
@@ -508,6 +520,17 @@
     // En la app la conexión la maneja Android (WiFi y cable USB con WebSocket; Bluetooth LE), con la misma forma
     // que un WebSocket. La biblioteca de Steam se pide a la PC elegida a través de la app (/pc/...).
     BASE = destino && destino.tipo === "red" ? "/pc" : "";
+    // Si la PC guardada ahora avisa desde otra dirección (con el cable USB cambia cada vez que se activa el
+    // anclaje; en el WiFi, si el router le dio otra), se usa la nueva en vez de fallar.
+    if (BASE) {
+      try {
+        const pc = (JSON.parse(APP.pcs()) || []).find((p) => p.nombre === destino.nombre);
+        if (pc && (pc.ip !== destino.ip || pc.puerto !== destino.puerto)) {
+          destino = { ...destino, ip: pc.ip, puerto: pc.puerto };
+          guardarLocal("destino", JSON.stringify(destino));
+        }
+      } catch (e) {}
+    }
     const c = { readyState: 0, send(m) { if (c.readyState === 1) APP.enviar(m); }, close() { c.readyState = 3; APP.cerrar(); } };
     window.ccEvento = (tipo, dato) => {
       if (tipo === "open") { c.readyState = 1; if (c.onopen) c.onopen(); }
@@ -641,6 +664,8 @@
         vibrarJuego(+p[1], +p[2]);
       } else if (p[0] === "j") {
         juegoAbiertoEnPC(+p[1], p[2], p.slice(3).join(" "));
+      } else if (p[0] === "app") {
+        avisarAppNueva(p[1]);
       }
     };
     ws.onclose = () => {
@@ -1506,11 +1531,124 @@
     else mostrarBuscador();
   }
 
+  // ---------- App de Android: avisar si la PC tiene una versión más nueva de la app ----------
+  // La PC manda su versión al conectarse ("app 1.9.0"); el programa de la PC trae adentro la app de su misma versión.
+  // Se baja desde la misma PC (anda sin internet); por Bluetooth (sin dirección), desde GitHub.
+  const DESCARGA_APP = "https://github.com/markbackend/CONTROL-CELULAR/releases/latest/download/ControlCelular.apk";
+  function versionMenor(a, b) {
+    const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
+    for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); }
+    return false;
+  }
+  function avisarAppNueva(deLaPC) {
+    if (!APP || !/^\d+\.\d+\.\d+$/.test(deLaPC || "")) return;
+    let mia = "";
+    try { mia = APP.version(); } catch (e) {}
+    if (!mia || !versionMenor(mia, deLaPC)) return;
+    try { if (sessionStorage.getItem("appAvisada") === deLaPC) return; sessionStorage.setItem("appAvisada", deLaPC); } catch (e) {}
+    const enlace = destino && destino.tipo === "red" ? `http://${destino.ip}:${destino.puerto}/app.apk` : DESCARGA_APP;
+    $("appNuevaTexto").textContent = tr("Tenés la {n}", mia) + " " + tr("y la PC tiene la {n}.", deLaPC);
+    $("appNuevaLuego").onclick = () => $("appNueva").classList.remove("ver");
+    $("appNuevaBajar").onclick = () => {
+      $("appNueva").classList.remove("ver");
+      try { APP.abrirEnlace(enlace); } catch (e) { location.href = enlace; }
+    };
+    $("appNueva").classList.add("ver");
+  }
+
+  // ---------- Animación de apertura (app de Android) ----------
+  // El control aparece, el neón celeste → verde se enciende con dos parpadeos, sale el nombre y se desvanece
+  // (2,2 s, como la de la PC). Mientras tanto la app ya busca la PC por detrás. Un toque la saltea. Sale una vez
+  // por apertura de la app (no al recargar la página por ajustes) y no sale si Android tiene las animaciones quitadas.
+  function animacionApertura() {
+    try { if (sessionStorage.getItem("aperturaVista")) return; sessionStorage.setItem("aperturaVista", "1"); } catch (e) {}
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const capa = $("apertura"), lienzo = $("aperturaLienzo"), ctx = lienzo.getContext("2d");
+    const cuerpo = new Image(), mascara = new Image();
+    let neon = null, cargadas = 0, inicio = 0, fin = false;
+    const entre = (v, a, b) => Math.min(1, Math.max(0, (v - a) / (b - a)));
+    const suave = (k) => k * k * (3 - 2 * k);
+    const terminar = () => {
+      if (fin) return; fin = true;
+      capa.classList.add("sale");
+      setTimeout(() => { capa.hidden = true; }, 450);
+    };
+    capa.hidden = false;
+    capa.addEventListener("pointerdown", terminar);
+    const e = Math.min(2, devicePixelRatio || 1);
+    lienzo.width = Math.round(innerWidth * e); lienzo.height = Math.round(innerHeight * e);
+    // La máscara del neón (blanco sobre negro) se tiñe con el degradado y se le da transparencia.
+    const prepararNeon = () => {
+      const w = mascara.naturalWidth, h = mascara.naturalHeight, c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const x = c.getContext("2d");
+      x.drawImage(mascara, 0, 0);
+      const d = x.getImageData(0, 0, w, h), p = d.data;
+      for (let i = 0; i < p.length; i += 4) {
+        const k = Math.min(1, Math.max(0, ((i / 4) % w / w - .15) / .7));
+        p[i + 3] = p[i]; p[i] = 40 + 20 * k; p[i + 1] = 175 + 65 * k; p[i + 2] = 255 - 130 * k;
+      }
+      x.putImageData(d, 0, 0);
+      return c;
+    };
+    const brillo = (ms) => {
+      if (ms < 800) return 0;
+      if (ms < 860) return .85; if (ms < 930) return .1;
+      if (ms < 990) return 1; if (ms < 1060) return .25;
+      return Math.min(1, .7 + entre(ms, 1060, 1400) * .3);
+    };
+    const cuadro = () => {
+      if (fin) return;
+      const ahora = performance.now();
+      if (!inicio) inicio = ahora;
+      const ms = ahora - inicio, W = lienzo.width, H = lienzo.height;
+      ctx.clearRect(0, 0, W, H);
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#242b34"); g.addColorStop(1, "#0b0e12");
+      ctx.globalAlpha = suave(entre(ms, 250, 700)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      if (neon) {
+        const aparece = suave(entre(ms, 250, 800)), escala = .86 + .14 * aparece;
+        const alto = H * .62 * escala, ancho = alto * cuerpo.naturalWidth / cuerpo.naturalHeight;
+        const x = (W - ancho) / 2, y = (H - alto) / 2 - H * .06;
+        ctx.globalAlpha = aparece; ctx.drawImage(cuerpo, x, y, ancho, alto);
+        const b = brillo(ms);
+        if (b > 0) {
+          ctx.save(); ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = b * .9; ctx.filter = `blur(${Math.round(alto * .045)}px)`; ctx.drawImage(neon, x, y, ancho, alto);
+          ctx.globalAlpha = b * .8; ctx.filter = `blur(${Math.max(1, Math.round(alto * .012))}px)`; ctx.drawImage(neon, x, y, ancho, alto);
+          ctx.filter = "none"; ctx.globalAlpha = b; ctx.drawImage(neon, x, y, ancho, alto);
+          ctx.restore();
+        }
+        const nombre = suave(entre(ms, 1400, 1750));
+        if (nombre > 0) {
+          ctx.font = `700 ${Math.round(H * .075)}px system-ui, sans-serif`;
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          const tg = ctx.createLinearGradient(W * .35, 0, W * .65, 0);
+          tg.addColorStop(0, "#28afff"); tg.addColorStop(1, "#3cf07d");
+          ctx.globalAlpha = nombre; ctx.fillStyle = tg;
+          ctx.fillText("Control Celular", W / 2, y + alto + H * .08 - (1 - nombre) * H * .02);
+        }
+      }
+      ctx.globalAlpha = 1;
+      if (ms >= 1800) { terminar(); return; }  // el desvanecido final lo hace la capa (CSS)
+      requestAnimationFrame(cuadro);
+    };
+    const cargada = () => {
+      if (++cargadas < 2) return;
+      try { neon = prepararNeon(); } catch (err) { neon = mascara; }
+    };
+    cuerpo.onload = cargada; mascara.onload = cargada;
+    cuerpo.onerror = mascara.onerror = terminar;
+    cuerpo.src = "animacion-cuerpo.png"; mascara.src = "animacion-neon.png";
+    setTimeout(terminar, 4000);  // por las dudas: nunca queda tapando la app
+    requestAnimationFrame(cuadro);
+  }
+
   // ---------- Arranque ----------
   if (juegoElegido) ponerJuego(juegoElegido, false); // deja dibujado el control del último juego
   ponerModelo(leer("modelo", "completo"));
   aplicarGiro();
-  if (APP) arrancarApp();
+  if (APP) { animacionApertura(); arrancarApp(); }
   else if (token) conectar(token);
   else if (codigoQR) conectar(codigoQR); // vino del QR: se empareja solo, sin escribir nada
   else pedirCodigo();
